@@ -1,210 +1,381 @@
 import pygame
 import random
 import math
+import json
+import os
+import cv2
 
-# Inicialização
+# --- INICIALIZAÇÃO ---
 pygame.init()
 pygame.mixer.init()
 
-# Pega a resolução da tela do PC
 info_tela = pygame.display.Info()
 largura_tela = info_tela.current_w
 altura_tela = info_tela.current_h
 
-# Configurações de Janela
 tela = pygame.display.set_mode((largura_tela, altura_tela), pygame.FULLSCREEN)
 pygame.display.set_caption("Prison Realms")
 
-# Estados do Jogo
-menu = True
-menu_pausa = False
-menu_note = False  
-fase_zero_completa = False
-fases_desbloqueadas = [0] 
-colidindo_notebook = False # Variável para evitar que o menu reabra sozinho
+# --- CAMINHOS ---
+MUSICA_MENU = r"C:\Users\_MARCOS\Documents\Games\MMOGAME\icon\menumusic (1).mp3"
+MUSICA_GAMEPLAY = r"C:\Users\_MARCOS\Documents\Games\CorredorNhangaMetas\gameplaymusic (2).mp3"
+CAMINHO_VIDEO = r"C:\Users\_MARCOS\Downloads\cine1.mp4"
+SOM_VIDEO = r"C:\Users\_MARCOS\Downloads\cine1.mp3"
 
-# Carregamento da Imagem do Notebook
-try:
-    img_notebook = pygame.image.load("app_py/download__1_-removebg-preview.png")
-    img_notebook = pygame.transform.scale(img_notebook, (largura_tela, altura_tela))
-except:
-    img_notebook = None
+# --- SISTEMA DE SAVE ---
+arquivo_save = "save_prison_realms.json"
+
+# Variáveis de Estado
+menu = True
+menu_note = False 
+confirmando_novo_jogo = False
+confirmando_voltar_menu = False
+confirmando_sair_jogo = False
+morreu = False
+fases_desbloqueadas = [0] 
+colidindo_notebook = False 
 
 # Atributos do Jogador
 largura_q, altura_q = 50, 50
-x, y = largura_tela // 2 - largura_q // 2, altura_tela // 2 - altura_q // 2
+x, y = largura_tela // 2, altura_tela // 2
 velocidade = 10
 hp = 100
 max_hp = 100
-cor_olho = (255, 0, 255) # Roxo
-cor_jogador = (255, 255, 255) # Branco
+cor_olho = (255, 0, 255)
+cor_jogador = (255, 255, 255)
 
-# Configuração do Notebook Físico
-notebook_rect = pygame.Rect(largura_tela // 2 - 30, altura_tela // 2 - 20, 60, 40)
+# Notebook no mapa
+notebook_rect = pygame.Rect(largura_tela // 2 - 40, altura_tela // 2 - 30, 80, 50)
 
-# Projéteis Jogador
-projetil_largura, projetil_altura = 30, 15
-projetil_cor = (255, 255, 255)
+# Projéteis
 projetil_velocidade = 15
 projetil_lista = []
 cooldown_tiro = 600  
 ultimo_tiro = 0
 direcao_jogador = "direita"
 
-# --- VARIÁVEIS PARA TIROS DOS GUARDIÕES ---
+# Inimigos
 projetil_inimigo_lista = []
-velocidade_tiro_inimigo = 4 
-cooldown_tiro_inimigo = 3500 
-dano_tiro_inimigo = 5 
-
-# Cores e Inimigos
+velocidade_tiro_inimigo = 6
+cooldown_tiro_inimigo = 1200
+dano_tiro_inimigo = 23
 cor_fundo = (70, 30, 80)
 cor_inimigo = (255, 0, 0) 
 cor_guardiao = (0, 0, 0)   
-
-# Sistema de Dano
-ultimo_dano = pygame.time.get_ticks()
+ultimo_dano = 0
 intervalo_dano = 1000
 
-# --- DICIONÁRIO DE FASES ---
-fases = {
-    0: [
-        {"rect": pygame.Rect(largura_tela * 0.1, altura_tela * 0.1, 50, 50), "hp": 3, "tipo": "morador"},
-        {"rect": pygame.Rect(largura_tela * 0.5, altura_tela * 0.3, 50, 50), "hp": 3, "tipo": "morador"},
-        {"rect": pygame.Rect(largura_tela * 0.8, altura_tela * 0.7, 50, 50), "hp": 3, "tipo": "morador"},
-        {"rect": pygame.Rect(largura_tela * 0.2, altura_tela * 0.8, 50, 50), "hp": 3, "tipo": "morador"},
-        {"rect": pygame.Rect(largura_tela * 0.7, altura_tela * 0.2, 50, 50), "hp": 3, "tipo": "morador"}
-    ],
-    1: [{"rect": pygame.Rect(random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 50, 50), "hp": 4, "tipo": "morador"} for _ in range(4)],
-    2: [{"rect": pygame.Rect(random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 60, 60), "hp": 8, "tipo": "guardiao", "ultimo_ataque": 0} for _ in range(3)],
-    3: [{"rect": pygame.Rect(random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 50, 50), "hp": 5, "tipo": "morador"} for _ in range(5)],
-    4: [{"rect": pygame.Rect(random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 60, 60), "hp": 10, "tipo": "guardiao", "ultimo_ataque": 0} for _ in range(4)],
-    5: [{"rect": pygame.Rect(random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 55, 55), "hp": 7, "tipo": "morador"} for _ in range(6)]
+# --- CONFIGURAÇÃO DE FASES ---
+fases_originais = {
+    0: [{"rect": [largura_tela * 0.1, altura_tela * 0.1, 50, 50], "hp": 3, "tipo": "morador"},
+        {"rect": [largura_tela * 0.5, altura_tela * 0.3, 50, 50], "hp": 3, "tipo": "morador"},
+        {"rect": [largura_tela * 0.8, altura_tela * 0.7, 50, 50], "hp": 3, "tipo": "morador"},
+        {"rect": [largura_tela * 0.2, altura_tela * 0.8, 50, 50], "hp": 3, "tipo": "morador"},
+        {"rect": [largura_tela * 0.7, altura_tela * 0.2, 50, 50], "hp": 3, "tipo": "morador"}],
+    1: [{"rect": [random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 50, 50], "hp": 4, "tipo": "morador"} for _ in range(4)],
+    2: [{"rect": [random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 60, 60], "hp": 8, "tipo": "guardiao", "ultimo_ataque": 0} for _ in range(3)],
+    3: [{"rect": [random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 50, 50], "hp": 5, "tipo": "morador"} for _ in range(5)],
+    4: [{"rect": [random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 60, 60], "hp": 10, "tipo": "guardiao", "ultimo_ataque": 0} for _ in range(4)],
+    5: [{"rect": [random.randint(100, largura_tela-100), random.randint(100, altura_tela-100), 55, 55], "hp": 7, "tipo": "morador"} for _ in range(6)]
 }
 
 fase_atual = 0
-inimigos = [dict(inimigo) for inimigo in fases[fase_atual]]
+inimigos = []
+
+def resetar_inimigos_fase(f):
+    global inimigos
+    inimigos = []
+    for i in fases_originais[f]:
+        d = dict(i)
+        d["rect"] = pygame.Rect(i["rect"])
+        inimigos.append(d)
+
+resetar_inimigos_fase(fase_atual)
+
+# --- FUNÇÕES ---
 
 def desenhar_barra_hp(tela, x, y, hp, max_hp):
     largura_barra = 200
     altura_barra = 25
     cor_fundo_barra = (50, 50, 50)
-    cor_preenchimento = (255, 0, 0) if hp <= 0 else (255 - int(255 * (hp / max_hp)), int(255 * (hp / max_hp)), 0)
+    hp_viz = max(0, min(hp, max_hp))
+    proporcao = hp_viz / max_hp
+    cor_r = int(255 * (1 - proporcao))
+    cor_g = int(255 * proporcao)
     pygame.draw.rect(tela, cor_fundo_barra, (x, y, largura_barra, altura_barra))
-    if hp > 0:
-        pygame.draw.rect(tela, cor_preenchimento, (x, y, (largura_barra * hp) / max_hp, altura_barra))
+    if hp_viz > 0:
+        pygame.draw.rect(tela, (cor_r, cor_g, 0), (x, y, int(largura_barra * proporcao), altura_barra))
 
-def desenhar_menu_note(tela):
-    tela.fill((10, 10, 20))
-    pygame.draw.rect(tela, (0, 255, 100), (largura_tela//4, 50, largura_tela//2, altura_tela-100), 3, border_radius=15)
-    fonte_titulo = pygame.font.SysFont('Arial Black', 35)
-    fonte_fases = pygame.font.SysFont('Arial', 28)
-    txt = fonte_titulo.render("NOT_EBOOK: SISTEMA DE FASES", True, (0, 255, 0))
-    tela.blit(txt, (largura_tela // 2 - txt.get_width() // 2, 80))
-    for i in range(6):
-        liberada = i in fases_desbloqueadas
-        status = "[LIBERADA]" if liberada else "[BLOQUEADA]"
-        cor = (0, 255, 150) if liberada else (120, 120, 120)
-        txt_fase = fonte_fases.render(f"Fase {i}: {status}", True, cor)
-        tela.blit(txt_fase, (largura_tela // 2 - 180, 180 + i * 55))
-        if liberada:
-            txt_tecla = fonte_fases.render(f"Pressione {i}", True, (255, 255, 255))
-            tela.blit(txt_tecla, (largura_tela // 2 + 80, 180 + i * 55))
-    txt_voltar = fonte_fases.render("Pressione 'N' para SAIR", True, (255, 50, 50))
-    tela.blit(txt_voltar, (largura_tela // 2 - txt_voltar.get_width() // 2, altura_tela - 130))
+def desenhar_design_notebook(tela, rect):
+    pygame.draw.rect(tela, (40, 40, 40), (rect.x, rect.y + rect.height//2, rect.width, rect.height//2), border_bottom_left_radius=5, border_bottom_right_radius=5)
+    pygame.draw.rect(tela, (20, 20, 20), (rect.x + 5, rect.y, rect.width - 10, rect.height//2 + 5), border_top_left_radius=5, border_top_right_radius=5)
+    pygame.draw.rect(tela, (0, 40, 20), (rect.x + 10, rect.y + 5, rect.width - 20, rect.height//2 - 5))
+    pygame.draw.line(tela, (0, 255, 100), (rect.x + 15, rect.y + 10), (rect.x + 40, rect.y + 10), 2)
+    pygame.draw.line(tela, (0, 255, 100), (rect.x + 15, rect.y + 15), (rect.x + 30, rect.y + 15), 2)
+    for i in range(3):
+        pygame.draw.line(tela, (60, 60, 60), (rect.x + 10, rect.y + 32 + i*4), (rect.x + rect.width - 10, rect.y + 32 + i*4), 1)
+
+def desenhar_hud_tab(tela):
+    if len(fases_desbloqueadas) > 1:
+        fonte = pygame.font.SysFont('Arial', 22, bold=True)
+        alpha = abs(math.sin(pygame.time.get_ticks() * 0.005)) * 255
+        txt = fonte.render("[TAB] NOTEBOOK", True, (0, 255, 100))
+        txt.set_alpha(int(alpha))
+        tela.blit(txt, (largura_tela - 200, 30))
+
+def rodar_video():
+    if not os.path.exists(CAMINHO_VIDEO): return
+    cap = cv2.VideoCapture(CAMINHO_VIDEO)
+    try:
+        pygame.mixer.music.load(SOM_VIDEO)
+        pygame.mixer.music.play(-1)
+    except: pass
+    clock_v = pygame.time.Clock()
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret: break
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_ESCAPE, pygame.K_RETURN]:
+                    cap.release(); pygame.mixer.music.stop(); return
+        frame = cv2.rotate(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), cv2.ROTATE_90_COUNTERCLOCKWISE)
+        frame = cv2.flip(frame, 0)
+        surf = pygame.transform.scale(pygame.surfarray.make_surface(frame), (largura_tela, altura_tela))
+        tela.blit(surf, (0, 0)); pygame.display.flip(); clock_v.tick(30)
+    cap.release(); pygame.mixer.music.stop()
+
+def salvar_jogo():
+    inimigos_save = []
+    for ini in inimigos:
+        inimigos_save.append({"rect": [ini["rect"].x, ini["rect"].y, ini["rect"].width, ini["rect"].height], "hp": ini["hp"], "tipo": ini["tipo"]})
+    dados = {
+        "fases_desbloqueadas": fases_desbloqueadas,
+        "fase_atual": fase_atual,
+        "player_x": x, "player_y": y,
+        "player_hp": hp,
+        "inimigos_vivos": inimigos_save
+    }
+    with open(arquivo_save, "w") as f:
+        json.dump(dados, f)
+
+def carregar_jogo():
+    global fases_desbloqueadas, fase_atual, inimigos, x, y, hp
+    if os.path.exists(arquivo_save):
+        with open(arquivo_save, "r") as f:
+            dados = json.load(f)
+            fases_desbloqueadas = dados.get("fases_desbloqueadas", [0])
+            fase_atual = dados.get("fase_atual", 0)
+            x = dados.get("player_x", largura_tela // 2)
+            y = dados.get("player_y", altura_tela // 2)
+            hp = dados.get("player_hp", 100)
+            inimigos = []
+            for i in dados.get("inimigos_vivos", []):
+                inimigos.append({"rect": pygame.Rect(i["rect"]), "hp": i["hp"], "tipo": i["tipo"], "ultimo_ataque": 0})
+
+def novo_jogo():
+    global fases_desbloqueadas, fase_atual, x, y, hp, menu, ultimo_tiro
+    pygame.mixer.music.stop()
+    rodar_video()
+    fases_desbloqueadas = [0]
+    fase_atual = 0
+    resetar_inimigos_fase(fase_atual)
+    x, y, hp = largura_tela // 2, altura_tela // 2, 100
+    if os.path.exists(arquivo_save): os.remove(arquivo_save)
+    try:
+        pygame.mixer.music.load(MUSICA_GAMEPLAY); pygame.mixer.music.play(-1)
+    except: pass
+    ultimo_tiro = pygame.time.get_ticks() + 1000 
+    menu = False
+
+def desenhar_caixa_confirmacao(tela, texto):
+    pygame.draw.rect(tela, (30, 30, 30), (largura_tela//2 - 200, altura_tela//2 - 100, 400, 200), border_radius=20)
+    pygame.draw.rect(tela, (255, 255, 255), (largura_tela//2 - 200, altura_tela//2 - 100, 400, 200), 2, border_radius=20)
+    txt = pygame.font.SysFont('Arial', 25).render(texto, True, (255, 255, 255))
+    tela.blit(txt, (largura_tela//2 - txt.get_width()//2, altura_tela//2 - 60))
+    btn_sim = pygame.Rect(largura_tela//2 - 110, altura_tela//2 + 10, 100, 50)
+    btn_nao = pygame.Rect(largura_tela//2 + 10, altura_tela//2 + 10, 100, 50)
+    pygame.draw.rect(tela, (0, 150, 0), btn_sim, border_radius=10)
+    pygame.draw.rect(tela, (150, 0, 0), btn_nao, border_radius=10)
+    tela.blit(pygame.font.SysFont('Arial', 20, bold=True).render("SIM", True, (255, 255, 255)), (btn_sim.centerx-15, btn_sim.centery-10))
+    tela.blit(pygame.font.SysFont('Arial', 20, bold=True).render("NÃO", True, (255, 255, 255)), (btn_nao.centerx-15, btn_nao.centery-10))
+    return btn_sim, btn_nao
 
 def desenhar_menu(tela):
     tela.fill(cor_fundo)
+    mx, my = pygame.mouse.get_pos()
     fonte_titulo = pygame.font.SysFont('Arial Black', 72)
-    fonte_texto = pygame.font.SysFont('Arial', 40)
-    titulo = fonte_titulo.render("Começe", True, (255, 255, 255))
-    sombra = fonte_titulo.render("Começe", True, (100, 0, 150))
-    iniciar_texto = fonte_texto.render("Pressione ENTER para começar", True, (255, 255, 255))
-    tela.blit(sombra, (largura_tela // 2 - titulo.get_width() // 2 + 4, altura_tela // 4 + 4))
-    tela.blit(titulo, (largura_tela // 2 - titulo.get_width() // 2, altura_tela // 4))
-    botao_rect = pygame.Rect(largura_tela // 2 - 250, altura_tela // 2 - 40, 500, 80)
-    pygame.draw.rect(tela, (100, 40, 150), botao_rect, border_radius=20)
-    pygame.draw.rect(tela, (180, 80, 255), botao_rect, 5, border_radius=20)
-    tela.blit(iniciar_texto, (largura_tela // 2 - iniciar_texto.get_width() // 2, altura_tela // 2 - iniciar_texto.get_height() // 2))
-    cubo_rect = pygame.Rect(botao_rect.x - 80, botao_rect.y + 15, 50, 50)
-    pygame.draw.rect(tela, (255, 255, 255), cubo_rect)
-    pygame.draw.circle(tela, (160, 70, 255), (cubo_rect.x + 12, cubo_rect.y + 18), 10)
-    pygame.draw.circle(tela, (160, 70, 255), (cubo_rect.x + 38, cubo_rect.y + 18), 10)
+    titulo = fonte_titulo.render("Prison Realms", True, (255, 255, 255))
+    tela.blit(titulo, (largura_tela // 2 - titulo.get_width() // 2, altura_tela // 5))
+    
+    btn_jogar = pygame.Rect(largura_tela // 2 - 150, altura_tela // 2 - 100, 300, 60)
+    btn_novo = pygame.Rect(largura_tela // 2 - 150, altura_tela // 2 - 20, 300, 60)
+    btn_sair = pygame.Rect(largura_tela // 2 - 150, altura_tela // 2 + 60, 300, 60)
+
+    pygame.draw.rect(tela, (100, 40, 150) if not btn_jogar.collidepoint((mx, my)) else (140, 60, 200), btn_jogar, border_radius=15)
+    pygame.draw.rect(tela, (150, 40, 40) if not btn_novo.collidepoint((mx, my)) else (200, 60, 60), btn_novo, border_radius=15)
+    pygame.draw.rect(tela, (50, 50, 50) if not btn_sair.collidepoint((mx, my)) else (80, 80, 80), btn_sair, border_radius=15)
+
+    tela.blit(pygame.font.SysFont('Arial', 30).render("CONTINUAR / JOGAR", True, (255, 255, 255)), (btn_jogar.centerx - 130, btn_jogar.centery - 15))
+    tela.blit(pygame.font.SysFont('Arial', 30).render("NOVO JOGO", True, (255, 255, 255)), (btn_novo.centerx - 80, btn_novo.centery - 15))
+    tela.blit(pygame.font.SysFont('Arial', 30).render("FECHAR JOGO", True, (255, 255, 255)), (btn_sair.centerx - 90, btn_sair.centery - 15))
+
+    btn_s, btn_n = None, None
+    if confirmando_novo_jogo:
+        btn_s, btn_n = desenhar_caixa_confirmacao(tela, "TEM CERTEZA?")
+    elif confirmando_sair_jogo:
+        btn_s, btn_n = desenhar_caixa_confirmacao(tela, "QUER SAIR DO JOGO?")
+        
+    return btn_jogar, btn_novo, btn_sair, btn_s, btn_n
+
+def desenhar_tela_morte(tela):
+    s = pygame.Surface((largura_tela, altura_tela))
+    s.set_alpha(180); s.fill((0, 0, 0)); tela.blit(s, (0,0))
+    txt = pygame.font.SysFont('Arial Black', 80).render("VOCÊ CAIU", True, (255, 0, 0))
+    tela.blit(txt, (largura_tela//2 - txt.get_width()//2, altura_tela//3))
+    btn_renascer = pygame.Rect(largura_tela//2 - 100, altura_tela//2, 200, 60)
+    pygame.draw.rect(tela, (255, 255, 255), btn_renascer, border_radius=10)
+    tela.blit(pygame.font.SysFont('Arial', 30, bold=True).render("RENASCER", True, (0, 0, 0)), (btn_renascer.centerx - 70, btn_renascer.centery - 15))
+    return btn_renascer
+
+def desenhar_menu_note(tela):
+    tela.fill((10, 10, 20))
+    mx, my = pygame.mouse.get_pos()
+    pygame.draw.rect(tela, (0, 255, 100), (largura_tela//4, 50, largura_tela//2, altura_tela-100), 3, border_radius=15)
+    fonte_fases = pygame.font.SysFont('Arial', 28)
+    btn_salvar = pygame.Rect(largura_tela // 2 - 100, 100, 200, 50)
+    pygame.draw.rect(tela, (0, 100, 255) if not btn_salvar.collidepoint((mx, my)) else (50, 150, 255), btn_salvar, border_radius=10)
+    tela.blit(fonte_fases.render("SALVAR JOGO", True, (255, 255, 255)), (btn_salvar.centerx - 80, btn_salvar.centery - 15))
+    botoes_fases = {}
+    for i in range(6):
+        liberada = i in fases_desbloqueadas
+        rect_fase = pygame.Rect(largura_tela // 2 - 200, 200 + i * 55, 400, 40)
+        cor = (0, 255, 150) if liberada else (120, 120, 120)
+        if liberada and rect_fase.collidepoint((mx, my)):
+            pygame.draw.rect(tela, (20, 60, 40), rect_fase, border_radius=5)
+            cor = (150, 255, 200)
+        tela.blit(fonte_fases.render(f"Fase {i}: {'[LIBERADA]' if liberada else '[BLOQUEADA]'}", True, cor), (largura_tela // 2 - 180, 205 + i * 55))
+        if liberada: botoes_fases[i] = rect_fase
+    return btn_salvar, botoes_fases
 
 def inimigo_seguir_jogador(inimigo, jogador_x, jogador_y, vel):
-    dx = jogador_x - inimigo.x
-    dy = jogador_y - inimigo.y
-    distancia = (dx ** 2 + dy ** 2) ** 0.5
-    if distancia != 0:
-        inimigo.x += (dx / distancia) * vel
-        inimigo.y += (dy / distancia) * vel
+    dx, dy = jogador_x - inimigo.x, jogador_y - inimigo.y
+    dist = math.hypot(dx, dy)
+    if dist != 0:
+        inimigo.x += (dx / dist) * vel
+        inimigo.y += (dy / dist) * vel
 
+# --- LOOP PRINCIPAL ---
 try:
-    pygame.mixer.music.load(r"app_py/menumusic (1).mp3")
-    pygame.mixer.music.play(-1, 0.0)
+    pygame.mixer.music.load(MUSICA_MENU); pygame.mixer.music.play(-1)
 except: pass
 
 clock = pygame.time.Clock()
 rodando = True
+carregar_jogo()
 
 while rodando:
     clock.tick(60)
     agora = pygame.time.get_ticks()
+    mx, my = pygame.mouse.get_pos()
+    clique_mouse = pygame.mouse.get_pressed()
 
     for evento in pygame.event.get():
-        if evento.type == pygame.QUIT:
-            rodando = False
+        if evento.type == pygame.QUIT: rodando = False
+        
         if evento.type == pygame.KEYDOWN:
-            if menu and evento.key == pygame.K_RETURN:
-                menu = False
-                try:
-                    pygame.mixer.music.load(r"app_py/gameplaymusic (2) (1).mp3")
-                    pygame.mixer.music.play(-1, 0.0)
-                except: pass
-            elif menu_note and evento.key == pygame.K_n:
-                menu_note = False
+            if evento.key == pygame.K_ESCAPE:
+                if menu: confirmando_sair_jogo = not confirmando_sair_jogo
+                elif not menu_note and not morreu: confirmando_voltar_menu = not confirmando_voltar_menu
+            if evento.key == pygame.K_TAB and not menu and not morreu:
+                if len(fases_desbloqueadas) > 1: menu_note = not menu_note
+            if menu_note and evento.key == pygame.K_n: menu_note = False
+
+        if evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
+            if menu:
+                bj, bn, bs_exit, bs, bna = desenhar_menu(tela)
+                if confirmando_novo_jogo:
+                    if bs and bs.collidepoint((mx, my)): confirmando_novo_jogo = False; novo_jogo()
+                    elif bna and bna.collidepoint((mx, my)): confirmando_novo_jogo = False
+                elif confirmando_sair_jogo:
+                    if bs and bs.collidepoint((mx, my)): rodando = False # SIM sai do jogo
+                    elif bna and bna.collidepoint((mx, my)): confirmando_sair_jogo = False # NÃO fecha janela
+                else:
+                    if bj.collidepoint((mx, my)):
+                        menu = False; ultimo_tiro = agora + 1000
+                        try:
+                            pygame.mixer.music.stop(); pygame.mixer.music.load(MUSICA_GAMEPLAY); pygame.mixer.music.play(-1)
+                        except: pass
+                    elif bn.collidepoint((mx, my)): confirmando_novo_jogo = True
+                    elif bs_exit.collidepoint((mx, my)): confirmando_sair_jogo = True
+            
+            elif morreu:
+                btn_r = desenhar_tela_morte(tela)
+                if btn_r.collidepoint((mx, my)):
+                    hp = 100; morreu = False; x, y = largura_tela//2, altura_tela//2
+                    resetar_inimigos_fase(fase_atual)
+                    projetil_lista.clear(); projetil_inimigo_lista.clear()
+            
+            elif confirmando_voltar_menu:
+                bs, bna = desenhar_caixa_confirmacao(tela, "VOLTAR AO MENU?")
+                if bs.collidepoint((mx, my)): # SIM volta ao menu
+                    salvar_jogo(); confirmando_voltar_menu = False; menu = True
+                    try: pygame.mixer.music.load(MUSICA_MENU); pygame.mixer.music.play(-1)
+                    except: pass
+                elif bna.collidepoint((mx, my)): confirmando_voltar_menu = False # NÃO fecha janela
+            
             elif menu_note:
-                tecla_pressionada = evento.unicode
-                if tecla_pressionada.isdigit():
-                    fase_escolhida = int(tecla_pressionada)
-                    if fase_escolhida in fases_desbloqueadas:
-                        fase_atual = fase_escolhida
-                        inimigos = [dict(i) for i in fases[fase_atual]]
-                        menu_note = False
-                        x, y = largura_tela // 2, altura_tela // 2
-                        hp = 100
-                        projetil_lista.clear()
-                        projetil_inimigo_lista.clear()
+                bs, bf = desenhar_menu_note(tela)
+                if bs.collidepoint((mx, my)): salvar_jogo()
+                for n, r in bf.items():
+                    if r.collidepoint((mx, my)):
+                        fase_atual = n; resetar_inimigos_fase(n); menu_note = False
+                        x, y, hp = largura_tela//2, altura_tela//2, 100
+                        projetil_lista.clear(); projetil_inimigo_lista.clear()
 
     if menu:
-        desenhar_menu(tela)
-        pygame.display.flip()
-        continue
-    
+        desenhar_menu(tela); pygame.display.flip(); continue
+    if morreu:
+        desenhar_tela_morte(tela); pygame.display.flip(); continue
+    if confirmando_voltar_menu:
+        desenhar_caixa_confirmacao(tela, "VOLTAR AO MENU?"); pygame.display.flip(); continue
     if menu_note:
-        desenhar_menu_note(tela)
-        pygame.display.flip()
-        continue
+        desenhar_menu_note(tela); pygame.display.flip(); continue
 
+    # --- JOGO ---
     tela.fill(cor_fundo)
+    desenhar_hud_tab(tela)
     teclas = pygame.key.get_pressed()
+    dx_move, dy_move = 0, 0
+    teclado = any([teclas[pygame.K_a], teclas[pygame.K_d], teclas[pygame.K_w], teclas[pygame.K_s], teclas[pygame.K_LEFT], teclas[pygame.K_RIGHT], teclas[pygame.K_UP], teclas[pygame.K_DOWN]])
 
-    if teclas[pygame.K_a] or teclas[pygame.K_LEFT]: x -= velocidade; direcao_jogador = "esquerda"
-    if teclas[pygame.K_d] or teclas[pygame.K_RIGHT]: x += velocidade; direcao_jogador = "direita"
-    if teclas[pygame.K_w] or teclas[pygame.K_UP]: y -= velocidade; direcao_jogador = "cima"
-    if teclas[pygame.K_s] or teclas[pygame.K_DOWN]: y += velocidade; direcao_jogador = "baixo"
+    if teclado:
+        if teclas[pygame.K_a] or teclas[pygame.K_LEFT]: dx_move = -velocidade; direcao_jogador = "esquerda"
+        elif teclas[pygame.K_d] or teclas[pygame.K_RIGHT]: dx_move = velocidade; direcao_jogador = "direita"
+        if teclas[pygame.K_w] or teclas[pygame.K_UP]: dy_move = -velocidade; direcao_jogador = "cima"
+        elif teclas[pygame.K_s] or teclas[pygame.K_DOWN]: dy_move = velocidade; direcao_jogador = "baixo"
+    elif clique_mouse[2]:
+        dx_m, dy_m = mx - (x + 25), my - (y + 25)
+        dist = math.hypot(dx_m, dy_m)
+        if dist > 5:
+            dx_move, dy_move = (dx_m/dist)*velocidade, (dy_m/dist)*velocidade
+            direcao_jogador = ("direita" if dx_m > 0 else "esquerda") if abs(dx_m) > abs(dy_m) else ("baixo" if dy_m > 0 else "cima")
 
-    if teclas[pygame.K_SPACE] and agora - ultimo_tiro >= cooldown_tiro:
-        pos_tiro = (x + 25, y + 25)
-        if direcao_jogador == "direita": dx, dy = projetil_velocidade, 0
-        elif direcao_jogador == "esquerda": dx, dy = -projetil_velocidade, 0
-        elif direcao_jogador == "cima": dx, dy = 0, -projetil_velocidade
-        else: dx, dy = 0, projetil_velocidade
-        projetil_lista.append({"rect": pygame.Rect(pos_tiro[0], pos_tiro[1], 30, 15), "dx": dx, "dy": dy})
-        ultimo_tiro = agora
+    x = max(0, min(x + dx_move, largura_tela - largura_q))
+    y = max(0, min(y + dy_move, altura_tela - altura_q))
 
-    x = max(0, min(x, largura_tela - largura_q))
-    y = max(0, min(y, altura_tela - altura_q))
+    if (teclas[pygame.K_SPACE] or clique_mouse[0]) and agora >= ultimo_tiro:
+        dx_t, dy_t = 0, 0
+        if clique_mouse[0]:
+            dx_m, dy_m = mx - (x + 25), my - (y + 25)
+            dist = math.hypot(dx_m, dy_m)
+            if dist > 0: dx_t, dy_t = (dx_m/dist)*projetil_velocidade, (dy_m/dist)*projetil_velocidade
+        else:
+            if direcao_jogador == "direita": dx_t = projetil_velocidade
+            elif direcao_jogador == "esquerda": dx_t = -projetil_velocidade
+            elif direcao_jogador == "cima": dy_t = -projetil_velocidade
+            else: dy_t = projetil_velocidade
+        projetil_lista.append({"rect": pygame.Rect(x+25, y+25, 30, 15), "dx": dx_t, "dy": dy_t})
+        ultimo_tiro = agora + cooldown_tiro
 
     jogador_rect = pygame.Rect(x, y, largura_q, altura_q)
     pygame.draw.rect(tela, cor_jogador, jogador_rect)
@@ -212,48 +383,32 @@ while rodando:
     pygame.draw.circle(tela, cor_olho, (int(x + 38), int(y + 18)), 8)
 
     if not inimigos:
-        pygame.draw.rect(tela, (50, 50, 50), notebook_rect)
-        pygame.draw.rect(tela, (0, 255, 100), (notebook_rect.x + 10, notebook_rect.y + 5, 40, 20))
-        
-        # CONSERTO DO BOTÃO N (Lógica de detecção única)
+        desenhar_design_notebook(tela, notebook_rect)
         if jogador_rect.colliderect(notebook_rect):
-            if not colidindo_notebook: # Só entra aqui uma vez quando encosta
-                proxima_fase = fase_atual + 1
-                if proxima_fase <= 5 and proxima_fase not in fases_desbloqueadas:
-                    fases_desbloqueadas.append(proxima_fase)
-                menu_note = True
-                colidindo_notebook = True
-        else:
-            colidindo_notebook = False # Reseta quando o jogador se afasta
+            if not colidindo_notebook:
+                if fase_atual + 1 <= 5 and (fase_atual + 1) not in fases_desbloqueadas:
+                    fases_desbloqueadas.append(fase_atual + 1)
+                menu_note = True; colidindo_notebook = True
+        else: colidindo_notebook = False
     else:
         for ini in inimigos[:]:
             inimigo_seguir_jogador(ini["rect"], x, y, 2)
-            cor_c = cor_inimigo if ini["tipo"] == "morador" else cor_guardiao
-            pygame.draw.rect(tela, cor_c, ini["rect"])
+            pygame.draw.rect(tela, cor_inimigo if ini["tipo"] == "morador" else cor_guardiao, ini["rect"])
             cor_o = (0, 0, 0) if ini["tipo"] == "morador" else (255, 0, 255)
             pygame.draw.circle(tela, cor_o, (ini["rect"].x + 12, ini["rect"].y + 18), 6)
             pygame.draw.circle(tela, cor_o, (ini["rect"].x + 38, ini["rect"].y + 18), 6)
-
-            if ini["tipo"] == "guardiao":
-                if agora - ini["ultimo_ataque"] >= cooldown_tiro_inimigo:
-                    dx_ini = x - ini["rect"].centerx
-                    dy_ini = y - ini["rect"].centery
-                    dist = math.hypot(dx_ini, dy_ini)
-                    if dist != 0:
-                        dx_ini /= dist; dy_ini /= dist
-                        projetil_inimigo_lista.append({
-                            "rect": pygame.Rect(ini["rect"].centerx, ini["rect"].centery, 15, 15),
-                            "dx": dx_ini * velocidade_tiro_inimigo, "dy": dy_ini * velocidade_tiro_inimigo
-                        })
-                        ini["ultimo_ataque"] = agora
-
+            if ini["tipo"] == "guardiao" and agora - ini.get("ultimo_ataque", 0) >= cooldown_tiro_inimigo:
+                dx_i, dy_i = x - ini["rect"].centerx, y - ini["rect"].centery
+                dist = math.hypot(dx_i, dy_i)
+                if dist != 0:
+                    projetil_inimigo_lista.append({"rect": pygame.Rect(ini["rect"].centerx, ini["rect"].centery, 15, 15), "dx": (dx_i/dist)*4, "dy": (dy_i/dist)*4})
+                    ini["ultimo_ataque"] = agora
             if jogador_rect.colliderect(ini["rect"]) and agora - ultimo_dano >= intervalo_dano:
-                hp -= 15
-                ultimo_dano = agora
+                hp -= 15; ultimo_dano = agora
 
     for p in projetil_lista[:]:
         p["rect"].x += p["dx"]; p["rect"].y += p["dy"]
-        pygame.draw.rect(tela, projetil_cor, p["rect"])
+        pygame.draw.rect(tela, (255, 255, 255), p["rect"])
         for ini in inimigos[:]:
             if p["rect"].colliderect(ini["rect"]):
                 ini["hp"] -= 1
@@ -264,14 +419,10 @@ while rodando:
         pi["rect"].x += pi["dx"]; pi["rect"].y += pi["dy"]
         pygame.draw.circle(tela, (200, 200, 200), pi["rect"].center, 7)
         if pi["rect"].colliderect(jogador_rect):
-            hp -= dano_tiro_inimigo
-            projetil_inimigo_lista.remove(pi)
-        elif not tela.get_rect().colliderect(pi["rect"]):
-            projetil_inimigo_lista.remove(pi)
+            hp -= 5; projetil_inimigo_lista.remove(pi)
 
     desenhar_barra_hp(tela, 20, 20, hp, max_hp)
-    if hp <= 0: rodando = False
-    
     pygame.display.flip()
+    if hp <= 0: morreu = True
 
 pygame.quit()
