@@ -11,7 +11,6 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # --- CAMINHOS DINÂMICOS ---
 def resource_path(relative_path):
-    """ Retorna o caminho absoluto, funcionando no script e no executável """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -27,17 +26,16 @@ largura_tela = info_tela.current_w
 altura_tela = info_tela.current_h
 
 tela = pygame.display.set_mode((largura_tela, altura_tela), pygame.FULLSCREEN)
-pygame.display.set_caption("Prison Realms")
+pygame.display.set_caption("Note Kingdoms")
 
 # --- CONFIGURAÇÃO DE PASTAS ---
-# Mantendo o sistema simples como solicitado
-MUSICA_MENU = "assets/menumusic.mp3"
-MUSICA_GAMEPLAY = "assets/gameplaymusic.mp3"
-CAMINHO_VIDEO = "assets/cine1.mp4"
-SOM_VIDEO = "assets/cine1.mp3"
+MUSICA_MENU = resource_path("assets/menumusic.mp3")
+MUSICA_GAMEPLAY = resource_path("assets/gameplaymusic.mp3")
+CAMINHO_VIDEO = resource_path("assets/cut1 of.mp4")
+SOM_VIDEO = resource_path("assets/MUSICINE!OOF.mp3")
 
 # --- SISTEMA DE SAVE ---
-arquivo_save = "save_prison_realms.json"
+arquivo_save = "save_Note_Kingdon.json"
 
 # Variáveis de Estado
 menu = True
@@ -63,7 +61,7 @@ notebook_rect = pygame.Rect(largura_tela // 2 - 40, altura_tela // 2 - 30, 80, 5
 # Projéteis e Inimigos
 projetil_velocidade = 15
 projetil_lista = []
-cooldown_tiro = 600  
+cooldown_tiro = 600   
 ultimo_tiro = 0
 direcao_jogador = "direita"
 projetil_inimigo_lista = []
@@ -99,6 +97,7 @@ def resetar_inimigos_fase(f):
     for i in fases_originais[f]:
         d = dict(i)
         d["rect"] = pygame.Rect(i["rect"])
+        d.setdefault("ultimo_ataque", 0)
         inimigos.append(d)
 
 resetar_inimigos_fase(fase_atual)
@@ -135,45 +134,42 @@ def desenhar_hud_tab(tela):
         tela.blit(txt, (largura_tela - 200, 30))
 
 def rodar_video():
-    # Para a música do menu antes de começar o vídeo
-    pygame.mixer.music.stop()
-    
-    if not os.path.exists(CAMINHO_VIDEO): 
-        print(f"AVISO: Vídeo não encontrado em {CAMINHO_VIDEO}")
-        return
-    
+    if not os.path.exists(CAMINHO_VIDEO): return
+
     cap = cv2.VideoCapture(CAMINHO_VIDEO)
-    try:
-        # Se existir som do vídeo, toca
-        if os.path.exists(SOM_VIDEO):
-            pygame.mixer.music.load(SOM_VIDEO)
-            pygame.mixer.music.play()
-    except Exception as e: 
-        print(f"Erro ao carregar som do vídeo: {e}")
-        
-    clock_v = pygame.time.Clock()
+    fps_video = cap.get(cv2.CAP_PROP_FPS)
+    if fps_video <= 0: fps_video = 30
+
+    if os.path.exists(SOM_VIDEO):
+        pygame.mixer.music.load(SOM_VIDEO)
+        pygame.mixer.music.play()
+
+    relogio_v = pygame.time.Clock()
+    
     while cap.isOpened():
         ret, frame = cap.read()
-        if not ret: break
-        for event in pygame.event.get():
-            if event.type == pygame.KEYDOWN:
-                if event.key in [pygame.K_ESCAPE, pygame.K_RETURN]:
-                    cap.release()
-                    pygame.mixer.music.stop()
-                    return
+        if not ret: break 
         
-        # Rotacionar e ajustar frame
-        frame = cv2.rotate(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), cv2.ROTATE_90_COUNTERCLOCKWISE)
-        frame = cv2.flip(frame, 0)
-        surf = pygame.transform.scale(pygame.surfarray.make_surface(frame), (largura_tela, altura_tela))
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                cap.release(); pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_SPACE]:
+                    cap.release(); pygame.mixer.music.stop(); return 
+
+        frame = cv2.resize(frame, (largura_tela, altura_tela))
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        surf = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
         tela.blit(surf, (0, 0))
         pygame.display.flip()
-        clock_v.tick(30)
-    
+        
+        relogio_v.tick(fps_video)
+
     cap.release()
     pygame.mixer.music.stop()
 
 def salvar_jogo():
+    if morreu: return
     inimigos_save = []
     for ini in inimigos:
         inimigos_save.append({"rect": [ini["rect"].x, ini["rect"].y, ini["rect"].width, ini["rect"].height], "hp": ini["hp"], "tipo": ini["tipo"]})
@@ -184,60 +180,50 @@ def salvar_jogo():
         "player_hp": hp,
         "inimigos_vivos": inimigos_save
     }
-    with open(arquivo_save, "w") as f:
-        json.dump(dados, f)
+    try:
+        with open(arquivo_save, "w") as f:
+            json.dump(dados, f)
+    except Exception as e:
+        print(f"Erro ao salvar: {e}")
 
 def carregar_jogo():
     global fases_desbloqueadas, fase_atual, inimigos, x, y, hp
     if os.path.exists(arquivo_save):
-        with open(arquivo_save, "r") as f:
-            dados = json.load(f)
-            fases_desbloqueadas = dados.get("fases_desbloqueadas", [0])
-            fase_atual = dados.get("fase_atual", 0)
-            x = dados.get("player_x", largura_tela // 2)
-            y = dados.get("player_y", altura_tela // 2)
-            hp = dados.get("player_hp", 100)
-            inimigos = []
-            for i in dados.get("inimigos_vivos", []):
-                inimigos.append({"rect": pygame.Rect(i["rect"]), "hp": i["hp"], "tipo": i["tipo"], "ultimo_ataque": 0})
+        try:
+            with open(arquivo_save, "r") as f:
+                dados = json.load(f)
+                fases_desbloqueadas = dados.get("fases_desbloqueadas", [0])
+                fase_atual = dados.get("fase_atual", 0)
+                x = dados.get("player_x", largura_tela // 2)
+                y = dados.get("player_y", altura_tela // 2)
+                hp = dados.get("player_hp", 100)
+                inimigos = []
+                for i in dados.get("inimigos_vivos", []):
+                    ini_dict = {"rect": pygame.Rect(i["rect"]), "hp": i["hp"], "tipo": i["tipo"], "ultimo_ataque": 0}
+                    inimigos.append(ini_dict)
+        except Exception as e:
+            print(f"Save corrompido: {e}")
 
 def novo_jogo():
     global fases_desbloqueadas, fase_atual, x, y, hp, menu, ultimo_tiro
-    # 1. Apaga o save antigo
-    if os.path.exists(arquivo_save): 
-        os.remove(arquivo_save)
-     
-    # Roda o vídeo
+    pygame.mixer.music.stop()
     rodar_video()
     
-    # --- CORREÇÃO DE ÁUDIO ---
-    # Reinicia o mixer para garantir que a troca de áudio funcione limpa
-    try:
-        pygame.mixer.quit()
-        pygame.mixer.init()
-        pygame.mixer.music.set_volume(1.0)
-    except:
-        pass
-    # -------------------------
+    if os.path.exists(arquivo_save): 
+        os.remove(arquivo_save)
      
     fases_desbloqueadas = [0]
     fase_atual = 0
     resetar_inimigos_fase(fase_atual)
     x, y, hp = largura_tela // 2, altura_tela // 2, 100
      
-    # Tenta carregar a música da gameplay
-    try:
-        print(f"Tentando carregar música gameplay: {MUSICA_GAMEPLAY}")
-        if os.path.exists(MUSICA_GAMEPLAY):
-            pygame.mixer.music.load(MUSICA_GAMEPLAY)
-            pygame.mixer.music.play(-1)
-        else:
-            print("ARQUIVO DE MUSICA GAMEPLAY NAO ENCONTRADO!")
-    except Exception as e:
-        print(f"ERRO CRÍTICO NA MÚSICA DE GAMEPLAY: {e}")
+    if os.path.exists(MUSICA_GAMEPLAY):
+        pygame.mixer.music.load(MUSICA_GAMEPLAY)
+        pygame.mixer.music.play(-1)
 
     ultimo_tiro = pygame.time.get_ticks() + 1000 
     menu = False
+    salvar_jogo() 
 
 def desenhar_caixa_confirmacao(tela, texto):
     pygame.draw.rect(tela, (30, 30, 30), (largura_tela//2 - 200, altura_tela//2 - 100, 400, 200), border_radius=20)
@@ -256,33 +242,29 @@ def desenhar_menu(tela):
     tela.fill(cor_fundo)
     mx, my = pygame.mouse.get_pos()
     fonte_titulo = pygame.font.SysFont('Arial Black', 72)
-    titulo = fonte_titulo.render("Prison Realms", True, (255, 255, 255))
+    titulo = fonte_titulo.render("Note Kingdon", True, (255, 255, 255))
     tela.blit(titulo, (largura_tela // 2 - titulo.get_width() // 2, altura_tela // 5))
-     
+    
     tem_save = os.path.exists(arquivo_save)
     btn_jogar = pygame.Rect(largura_tela // 2 - 150, altura_tela // 2 - 100, 300, 60)
     btn_novo = pygame.Rect(largura_tela // 2 - 150, altura_tela // 2 - 20, 300, 60)
     btn_sair = pygame.Rect(largura_tela // 2 - 150, altura_tela // 2 + 60, 300, 60)
      
-    if not tem_save:
-        cor_continuar = (30, 30, 30)
-    else:
-        cor_continuar = (100, 40, 150) if not btn_jogar.collidepoint((mx, my)) else (140, 60, 200)
-         
-    pygame.draw.rect(tela, cor_continuar, btn_jogar, border_radius=15)
+    cor_cont = (100, 40, 150) if tem_save else (30, 30, 30)
+    if tem_save and btn_jogar.collidepoint((mx, my)): cor_cont = (140, 60, 200)
+    
+    pygame.draw.rect(tela, cor_cont, btn_jogar, border_radius=15)
     pygame.draw.rect(tela, (150, 40, 40) if not btn_novo.collidepoint((mx, my)) else (200, 60, 60), btn_novo, border_radius=15)
     pygame.draw.rect(tela, (50, 50, 50) if not btn_sair.collidepoint((mx, my)) else (80, 80, 80), btn_sair, border_radius=15)
      
-    cor_texto_cont = (255, 255, 255) if tem_save else (100, 100, 100)
-    tela.blit(pygame.font.SysFont('Arial', 30).render("CONTINUAR", True, cor_texto_cont), (btn_jogar.centerx - 80, btn_jogar.centery - 15))
+    cor_txt_cont = (255, 255, 255) if tem_save else (100, 100, 100)
+    tela.blit(pygame.font.SysFont('Arial', 30).render("CONTINUAR", True, cor_txt_cont), (btn_jogar.centerx - 80, btn_jogar.centery - 15))
     tela.blit(pygame.font.SysFont('Arial', 30).render("NOVO JOGO", True, (255, 255, 255)), (btn_novo.centerx - 80, btn_novo.centery - 15))
     tela.blit(pygame.font.SysFont('Arial', 30).render("FECHAR JOGO", True, (255, 255, 255)), (btn_sair.centerx - 90, btn_sair.centery - 15))
      
     btn_s, btn_n = None, None
-    if confirmando_novo_jogo:
-        btn_s, btn_n = desenhar_caixa_confirmacao(tela, "TEM CERTEZA?")
-    elif confirmando_sair_jogo:
-        btn_s, btn_n = desenhar_caixa_confirmacao(tela, "QUER SAIR DO JOGO?")
+    if confirmando_novo_jogo: btn_s, btn_n = desenhar_caixa_confirmacao(tela, "TEM CERTEZA?")
+    elif confirmando_sair_jogo: btn_s, btn_n = desenhar_caixa_confirmacao(tela, "QUER SAIR DO JOGO?")
     return btn_jogar, btn_novo, btn_sair, btn_s, btn_n, tem_save
 
 def desenhar_tela_morte(tela):
@@ -323,12 +305,9 @@ def inimigo_seguir_jogador(inimigo, jogador_x, jogador_y, vel):
         inimigo.y += (dy / dist) * vel
 
 # --- LOOP PRINCIPAL ---
-try:
-    print(f"Carregando música menu: {MUSICA_MENU}")
+if os.path.exists(MUSICA_MENU):
     pygame.mixer.music.load(MUSICA_MENU)
     pygame.mixer.music.play(-1)
-except Exception as e:
-    print(f"Erro música menu: {e}")
 
 clock = pygame.time.Clock()
 rodando = True
@@ -341,7 +320,9 @@ while rodando:
     clique_mouse = pygame.mouse.get_pressed()
 
     for evento in pygame.event.get():
-        if evento.type == pygame.QUIT: rodando = False
+        if evento.type == pygame.QUIT: 
+            if not menu and not morreu: salvar_jogo()
+            rodando = False
         
         if evento.type == pygame.KEYDOWN:
             if evento.key == pygame.K_ESCAPE:
@@ -356,19 +337,10 @@ while rodando:
                 if not confirmando_novo_jogo and not confirmando_sair_jogo:
                     if bj.collidepoint((mx, my)) and tem_save:
                         menu = False; ultimo_tiro = agora + 1000
-                        try:
-                            # --- CORREÇÃO AQUI ---
-                            # Resetar mixer ao carregar jogo salvo também
-                            pygame.mixer.music.stop()
-                            pygame.mixer.quit()
-                            pygame.mixer.init()
-                            pygame.mixer.music.set_volume(1.0)
-                            # ---------------------
-                            print(f"Iniciando música gameplay (continuar): {MUSICA_GAMEPLAY}")
+                        pygame.mixer.music.stop()
+                        if os.path.exists(MUSICA_GAMEPLAY):
                             pygame.mixer.music.load(MUSICA_GAMEPLAY)
                             pygame.mixer.music.play(-1)
-                        except Exception as e: 
-                            print(f"ERRO AO CARREGAR MUSICA GAMEPLAY (CONTINUAR): {e}")
                     elif bn.collidepoint((mx, my)): confirmando_novo_jogo = True
                     elif bs_exit.collidepoint((mx, my)): confirmando_sair_jogo = True
                 else:
@@ -391,17 +363,9 @@ while rodando:
                 if bs_box.collidepoint((mx, my)):
                     salvar_jogo()
                     confirmando_voltar_menu = False; menu = True
-                    try: 
-                        # --- CORREÇÃO AO VOLTAR PRO MENU ---
-                        pygame.mixer.music.stop()
-                        pygame.mixer.quit()
-                        pygame.mixer.init()
-                        pygame.mixer.music.set_volume(1.0)
-                        # -----------------------------------
+                    if os.path.exists(MUSICA_MENU):
                         pygame.mixer.music.load(MUSICA_MENU)
                         pygame.mixer.music.play(-1)
-                    except Exception as e:
-                        print(f"Erro ao voltar para música menu: {e}")
                 elif bna_box.collidepoint((mx, my)): confirmando_voltar_menu = False
             
             elif menu_note:
